@@ -1,61 +1,67 @@
 import tkinter as tk
-import serial
-import time
+import mido
+from mido import Message, open_output
 
-# Configuration du port série (à adapter selon ton Arduino)
-SERIAL_PORT = 'COM8'  # Remplace par le bon port (ex: '/dev/ttyUSB0' sur Linux)
-BAUD_RATE = 115200
+# Ouvrir le port MIDI pour Teensy
+midi_ports = mido.get_output_names()
+print("Ports MIDI disponibles:", midi_ports)
+midi_out = open_output(midi_ports[1])  # Vérifier que c'est bien le Teensy
 
-try:
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    time.sleep(2)  # Attendre que la connexion s'établisse
-except Exception as e:
-    print(f"Erreur de connexion au port série: {e}")
-    ser = None
+# Variable globale pour l'état de l'effet
+effect_on = False  
 
-def send_data():
-    if ser:
-        factorL = doppler_scale_L.get()
-        factorR = doppler_scale_R.get()
-        delay = delay_scale.get()
-        command = f"{factorL:.5f},{factorR:.5f},{delay}\n"
-        ser.write(command.encode('utf-8'))
-        print(f"Envoyé: {command}")
+# Fonction pour envoyer des messages MIDI
+def send_midi(cc, value):
+    midi_out.send(Message('control_change', control=cc, value=value))
+    print(f"MIDI envoyé: CC {cc} -> {value}")
 
+# Fonction pour mettre à jour l'affichage numérique
+def update_label(value, label, cc):
+    if effect_on:
+        midi_value = int((float(value) + 20) * (127 / 40))  # Conversion -20..20 en 0..127
+        send_midi(cc, midi_value)
+    else:
+        doppler_L.set(0)
+        doppler_R.set(0)
+
+# Fonction pour activer/désactiver l'effet
 def toggle_effect():
-    if ser:
-        ser.write(b'TOGGLE\n')  # Commande pour activer/désactiver
-        print("Effet activé/désactivé")
+    global effect_on  
+    effect_on = not effect_on
+    send_midi(12, 127 if effect_on else 0)
+    effect_label.config(text="Effet: Activé" if effect_on else "Effet: Désactivé", 
+                        fg="green" if effect_on else "red")
+    
+        
 
-# Création de l'interface
+# Création de l'interface Tkinter
 root = tk.Tk()
-root.title("Contrôle Doppler Stéréo")
+root.title("Contrôle MIDI Doppler")
 root.geometry("350x250")
 
-# Curseur pour le facteur Doppler gauche
-doppler_label_L = tk.Label(root, text="Facteur Doppler (Gauche)")
-doppler_label_L.pack()
-doppler_scale_L = tk.Scale(root, from_=-0.02, to=0.02, resolution=0.0001, orient='horizontal', command=lambda x: send_data())
-doppler_scale_L.pack()
+# Curseur + affichage numérique pour le Doppler gauche (CC 10)
+tk.Label(root, text="Doppler Gauche").pack()
+doppler_L = tk.Scale(root, from_=-20, to=20, resolution=1, orient='horizontal',
+                     command=lambda v: update_label(v, label_L, 10))
+doppler_L.pack()
+label_L = tk.Label(root, text="Valeur: 0")
+label_L.pack()
 
-# Curseur pour le facteur Doppler droit
-doppler_label_R = tk.Label(root, text="Facteur Doppler (Droite)")
-doppler_label_R.pack()
-doppler_scale_R = tk.Scale(root, from_=-0.02, to=0.02, resolution=0.0001, orient='horizontal', command=lambda x: send_data())
-doppler_scale_R.pack()
+# Curseur + affichage numérique pour le Doppler droit (CC 11)
+tk.Label(root, text="Doppler Droit").pack()
+doppler_R = tk.Scale(root, from_=-20, to=20, resolution=1, orient='horizontal',
+                     command=lambda v: update_label(v, label_R, 11))
+doppler_R.pack()
+label_R = tk.Label(root, text="Valeur: 0")
+label_R.pack()
 
-# Curseur pour le délai
-delay_label = tk.Label(root, text="Délai")
-delay_label.pack()
-delay_scale = tk.Scale(root, from_=0, to=1000, resolution=1, orient='horizontal', command=lambda x: send_data())
-delay_scale.pack()
+# Indicateur d'état pour l'effet
+effect_label = tk.Label(root, text="Effet: Désactivé", fg="red")
+effect_label.pack()
 
-# Bouton pour activer/désactiver
-button = tk.Button(root, text="Activer/Désactiver", command=toggle_effect)
-button.pack()
+# Bouton pour activer/désactiver l'effet (MIDI CC 12)
+effect_button = tk.Button(root, text="Activer/Désactiver Effet", command=toggle_effect)
+effect_button.pack()
 
+# Lancer Tkinter
 root.mainloop()
-
-# Fermer la connexion série à la fin
-if ser:
-    ser.close()
